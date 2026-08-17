@@ -19,7 +19,7 @@ public class Photo {
     private UUID id;
 
     @ManyToOne
-    @JoinColumn(name = "user_id")
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;              // 누구 사진인지
 
     private String filePath;        // 저장된 파일 경로

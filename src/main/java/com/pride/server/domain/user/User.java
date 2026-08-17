@@ -3,6 +3,7 @@ package com.pride.server.domain.user;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.util.UUID;
 
@@ -19,5 +20,7 @@ public class User {
     @Lob
     private float[] faceVector;  // 본인 얼굴 기준 벡터 (Python이 계산해줄 값)
 
+    @CreationTimestamp
+    @Column(updatable = false)
     private String createdAt;
 }

@@ -1,4 +1,5 @@
 package com.pride.server.domain.judgement;
+import org.hibernate.annotations.CreationTimestamp;
 
 import com.pride.server.domain.marker.Marker;
 import jakarta.persistence.*;
@@ -18,7 +19,7 @@ public class Judgement {
     private UUID id;
 
     @ManyToOne
-    @JoinColumn(name = "marker_id")
+    @JoinColumn(name = "marker_id", nullable = false)
     private Marker marker;             // 어느 마커에 대한 판정인지
 
     private String metricType;         // 어느 지표 기준인지 ("얼굴폭", "턱선각도" 등)
@@ -29,5 +30,7 @@ public class Judgement {
     private Double differenceValue;    // 예측선 대비 실제값 차이
     private Double confidence;         // 신뢰도
 
+    @CreationTimestamp
+    @Column(updatable = false)
     private String createdAt;
 }
