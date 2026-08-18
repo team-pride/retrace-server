@@ -52,4 +52,33 @@ public class FaceController {
                 .bodyToMono(String.class)
                 .block();
     }
+
+    @Operation(summary = "본인 여부 판정", description = "대조 사진 업로드 → 기준 벡터와 비교")
+    @PostMapping(value = "/verify", consumes = "multipart/form-data")
+    public String verify(
+            @RequestParam @Parameter(description = "사용자 UUID") String userId,
+            @RequestParam("file") MultipartFile file    // ← files List가 아니라 file 단수로!
+    ) throws IOException {
+
+        ByteArrayResource resource = new ByteArrayResource(file.getBytes()) {
+            @Override
+            public String getFilename() {
+                return file.getOriginalFilename();
+            }
+        };
+
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", resource);   // ← "files"가 아니라 "file"
+
+        return aiServerWebClient.post()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/face/verify")
+                        .queryParam("user_id", userId)
+                        .build())
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+    }
 }
