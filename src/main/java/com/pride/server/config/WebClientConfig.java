@@ -17,21 +17,36 @@ public class WebClientConfig {
     @Value("${ai-server.base-url}")
     private String aiServerBaseUrl;
 
+    @Value("${openai.api-key}")
+    private String openaiApiKey;
+
+    @Value("${openai.base-url}")
+    private String openaiBaseUrl;
+
     @Bean
     public WebClient aiServerWebClient() {
         HttpClient httpClient = HttpClient.create()
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)  // 연결 5초
-                .responseTimeout(Duration.ofSeconds(30));  // 응답 대기 30초 (모델 로딩 감안)
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
+                .responseTimeout(Duration.ofSeconds(30));
 
         ExchangeStrategies strategies = ExchangeStrategies.builder()
                 .codecs(configurer -> configurer.defaultCodecs()
-                        .maxInMemorySize(10 * 1024 * 1024)) // base64 이미지 응답 대응 (기본 256KB → 10MB)
+                        .maxInMemorySize(10 * 1024 * 1024))
                 .build();
 
         return WebClient.builder()
                 .baseUrl(aiServerBaseUrl)
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .exchangeStrategies(strategies)
+                .build();
+    }
+
+    @Bean
+    public WebClient openaiWebClient() {
+        return WebClient.builder()
+                .baseUrl(openaiBaseUrl)
+                .defaultHeader("Authorization", "Bearer " + openaiApiKey)
+                .defaultHeader("Content-Type", "application/json")
                 .build();
     }
 }
