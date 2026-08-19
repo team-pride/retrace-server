@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
@@ -24,6 +25,7 @@ import java.util.*;
 public class PhotoStorageController {
 
     private final StoredPhotoRepository storedPhotoRepository;
+    private final WebClient aiServerWebClient;
 
     @Operation(summary = "사진 저장", description = "지표 추출과 별개로, 되감기/비교용으로 사진을 서버에 저장")
     @PostMapping(value = "/store", consumes = "multipart/form-data")
@@ -72,7 +74,7 @@ public class PhotoStorageController {
                 .toList();
     }
 
-    @Operation(summary = "두 시점 사진 비교 조회", description = "지정한 두 날짜의 사진을 반환")
+    @Operation(summary = "두 시점 사진 비교 조회", description = "지정한 두 날짜의 사진과 지표 차이를 반환")
     @GetMapping("/compare")
     public Map<String, Object> comparePhotos(
             @RequestParam @Parameter(description = "사용자 UUID") String userId,
@@ -90,10 +92,48 @@ public class PhotoStorageController {
         List<StoredPhoto> photos1 = storedPhotoRepository.findByUserIdAndCapturedAtOrderByCreatedAtDesc(userId, d1);
         List<StoredPhoto> photos2 = storedPhotoRepository.findByUserIdAndCapturedAtOrderByCreatedAtDesc(userId, d2);
 
+        // 4개 지표 각각 두 날짜 값 차이 계산
+        String[] indicators = {"jaw_angle_deg", "face_width_ratio", "eyelid_height_ratio", "mouth_corner_angle_deg"};
+        Map<String, Object> indicatorDiffs = new HashMap<>();
+
+        for (String indicator : indicators) {
+            Map curveResponse = aiServerWebClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/api/v1/indicator/curve")
+                            .queryParam("user_id", userId)
+                            .queryParam("indicator", indicator)
+                            .build())
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (curveResponse == null) continue;
+
+            List<Map<String, Object>> points = (List<Map<String, Object>>) curveResponse.get("points");
+            if (points == null) continue;
+
+            Double value1 = findValueByDate(points, date1);
+            Double value2 = findValueByDate(points, date2);
+
+            if (value1 != null && value2 != null) {
+                double diff = value2 - value1;
+                indicatorDiffs.put(indicator, String.format("%+.1f", diff));
+            }
+        }
+
         Map<String, Object> result = new HashMap<>();
         result.put("date1Photo", photos1.isEmpty() ? null : photos1.get(0).getImageBase64());
         result.put("date2Photo", photos2.isEmpty() ? null : photos2.get(0).getImageBase64());
+        result.put("indicatorDiffs", indicatorDiffs);
         return result;
+    }
+
+    private Double findValueByDate(List<Map<String, Object>> points, String date) {
+        return points.stream()
+                .filter(p -> date.equals(p.get("captured_at")))
+                .map(p -> ((Number) p.get("value")).doubleValue())
+                .findFirst()
+                .orElse(null);
     }
 
     private LocalDate extractCapturedDate(byte[] imageBytes) {
