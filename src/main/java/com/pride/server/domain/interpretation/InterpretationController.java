@@ -1,5 +1,6 @@
 package com.pride.server.domain.interpretation;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -59,26 +60,27 @@ public class InterpretationController {
                 .bodyToMono(String.class)
                 .block();
 
-        // 2. 프롬프트 구성 (3개 섹션 JSON 구조로 요청)
+        // 2. 프롬프트 구성 (3개 섹션 json 구조로 요청)
+        // 🔥 에러 해결: OpenAI가 인식할 수 있도록 영어 'json' 단어를 명시적으로 추가했습니다.
         String prompt = """
                 당신은 사용자의 얼굴 변화 데이터를 해석해주는 AI입니다.
                 아래 규칙을 반드시 지켜서 설명해주세요.
-                
+
                 [금지 규칙]
                 - "피부 나이", "노화 점수" 같은 절대 평가 표현을 쓰지 마세요.
                 - 주름, 색소, 모공, 탄력 등 우리가 측정하지 않는 항목은 언급하지 마세요.
                 - 인과관계를 단정하지 말고, "시점이 맞아떨어진다"는 정도로만 표현하세요.
                 - "진단", "치료" 같은 의료적 표현을 쓰지 마세요.
                 - 데이터가 부족하면 억지로 확정하지 말고 "판단하기 이른 시기"라고 정직하게 표현하세요.
-                
+
                 [데이터]
                 곡선 데이터: %s
                 마커 목록: %s
                 효과 판정 결과: %s
-                
-                아래 3개 섹션으로 나눠서, 반드시 순수 JSON 형식으로만 응답하세요.
-                마크다운 코드블록(```)이나 설명 문구 없이 JSON 객체만 반환하세요.
-                
+
+                아래 3개 섹션으로 나눠서, 반드시 순수 json 형식으로만 응답하세요. (Respond strictly in json format)
+                마크다운 코드블록(```)이나 설명 문구 없이 json 객체만 반환하세요.
+
                 {
                   "noticedChange": {
                     "title": "눈에 띄는 변화를 한 문장으로 요약한 제목",
@@ -115,7 +117,44 @@ public class InterpretationController {
         Map message = (Map) choices.get(0).get("message");
         String content = (String) message.get("content");
 
-        // 4. GPT가 반환한 JSON 문자열을 파싱해서 그대로 응답
-        return objectMapper.readValue(content, Map.class);
+        // 4. GPT가 반환한 JSON 문자열을 Map으로 파싱
+        Map<String, Object> finalResponse = objectMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
+
+        // 5. curveData에서 수치 직접 꺼내서 finalResponse에 예쁘게 주입하기
+        try {
+            Map<String, Object> curveMap = objectMapper.readValue(curveData, new TypeReference<Map<String, Object>>() {});
+            Boolean eligible = (Boolean) curveMap.getOrDefault("eligible", false);
+
+            if (eligible) {
+                List<Map<String, Object>> points = (List<Map<String, Object>>) curveMap.get("points");
+
+                if (points != null && !points.isEmpty()) {
+                    // 제일 마지막 데이터가 '현재 수치'
+                    double currentValue = ((Number) points.get(points.size() - 1).get("value")).doubleValue();
+
+                    // 전체 평균 수치 계산
+                    double averageValue = points.stream()
+                            .mapToDouble(p -> ((Number) p.get("value")).doubleValue())
+                            .average()
+                            .orElse(0.0);
+
+                    // 소수점 첫째 자리까지만 깔끔하게 포맷팅
+                    String currentStr = String.format("%.1f", currentValue);
+                    String averageStr = String.format("%.1f", averageValue);
+
+                    // GPT가 만든 noticedChange 객체 안에 수치 필드 추가
+                    Map<String, Object> noticedChange = (Map<String, Object>) finalResponse.get("noticedChange");
+                    if (noticedChange != null) {
+                        noticedChange.put("currentValue", currentStr);
+                        noticedChange.put("averageValue", averageStr);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // 파이썬 데이터 파싱 중 에러가 나더라도 GPT 텍스트 응답 자체는 정상적으로 나가도록 예외 처리
+            System.out.println("수치 추출 중 에러 발생: " + e.getMessage());
+        }
+
+        return finalResponse;
     }
 }
