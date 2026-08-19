@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -19,15 +20,15 @@ public class CheckinController {
 
     private final WebClient aiServerWebClient;
 
-    private static final int CHECKIN_INTERVAL_DAYS = 90; // 체크인 기준일(예: 3개월), 필요시 조정
+    private static final int CHECKIN_INTERVAL_DAYS = 90; // 체크인 기준일, 필요시 조정
+    private static final double REMEASURE_MAGNITUDE_THRESHOLD = 5.0; // 재측정 권유 임계값, 필요시 조정
 
     @Operation(summary = "체크인 상태 조회", description = "가장 최근 마커 기준 D-day, 체크인 도달 여부 반환")
     @GetMapping("/status")
     public Map<String, Object> status(
             @RequestParam @Parameter(description = "사용자 UUID") String userId
     ) {
-        // 1. Python한테서 마커 목록 가져오기
-        Map markerResponse = aiServerWebClient.get()
+        Map<String, Object> markerResponse = aiServerWebClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v1/marker/list")
                         .queryParam("user_id", userId)
@@ -36,7 +37,14 @@ public class CheckinController {
                 .bodyToMono(Map.class)
                 .block();
 
-        List<Map> markers = (List<Map>) markerResponse.get("markers");
+        if (markerResponse == null) {
+            return Map.of(
+                    "hasMarker", false,
+                    "message", "AI 서버 응답이 비어있습니다."
+            );
+        }
+
+        List<Map<String, Object>> markers = (List<Map<String, Object>>) markerResponse.get("markers");
 
         if (markers == null || markers.isEmpty()) {
             return Map.of(
@@ -45,8 +53,7 @@ public class CheckinController {
             );
         }
 
-        // 2. 가장 최근 마커 찾기
-        Map latestMarker = markers.stream()
+        Map<String, Object> latestMarker = markers.stream()
                 .max((a, b) -> ((String) a.get("marker_date")).compareTo((String) b.get("marker_date")))
                 .orElseThrow();
 
@@ -60,8 +67,8 @@ public class CheckinController {
 
         return Map.of(
                 "hasMarker", true,
-                "markerId", latestMarker.get("marker_id"),
-                "markerDate", latestMarker.get("marker_date"),
+                "markerId", latestMarker.getOrDefault("marker_id", ""),
+                "markerDate", latestMarker.getOrDefault("marker_date", ""),
                 "daysSince", daysSince,
                 "daysRemaining", Math.max(daysRemaining, 0),
                 "isCheckinTime", isCheckinTime
@@ -74,7 +81,7 @@ public class CheckinController {
             @RequestParam @Parameter(description = "사용자 UUID") String userId,
             @RequestParam @Parameter(description = "지표명") String indicator
     ) {
-        Map curveResponse = aiServerWebClient.get()
+        Map<String, Object> curveResponse = aiServerWebClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v1/indicator/curve")
                         .queryParam("user_id", userId)
@@ -84,18 +91,26 @@ public class CheckinController {
                 .bodyToMono(Map.class)
                 .block();
 
-        List<Map> changePoints = (List<Map>) curveResponse.get("change_points");
+        if (curveResponse == null) {
+            return Map.of(
+                    "suggestRemeasure", false,
+                    "reasons", List.of(),
+                    "message", "AI 서버 응답이 비어있습니다."
+            );
+        }
+
+        List<Map<String, Object>> changePoints = (List<Map<String, Object>>) curveResponse.get("change_points");
         Boolean eligible = (Boolean) curveResponse.get("eligible");
 
         boolean suggestRemeasure = false;
-        List<String> reasons = new java.util.ArrayList<>();
+        List<String> reasons = new ArrayList<>();
 
         if (Boolean.TRUE.equals(eligible) && changePoints != null) {
-            for (Map cp : changePoints) {
+            for (Map<String, Object> cp : changePoints) {
                 Object magnitude = cp.get("magnitude");
-                if (magnitude != null && Math.abs(((Number) magnitude).doubleValue()) > 5.0) {
+                if (magnitude != null && Math.abs(((Number) magnitude).doubleValue()) > REMEASURE_MAGNITUDE_THRESHOLD) {
                     suggestRemeasure = true;
-                    reasons.add("곡선 변화 폭이 기준(5.0)을 초과했습니다");
+                    reasons.add("곡선 변화 폭이 기준(" + REMEASURE_MAGNITUDE_THRESHOLD + ")을 초과했습니다");
                     break;
                 }
             }
