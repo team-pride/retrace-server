@@ -31,11 +31,15 @@ public class OpenAiTestController {
                 )
         );
 
-        return openaiWebClient.post()
+        Map response = openaiWebClient.post()
                 .uri("/chat/completions")
                 .bodyValue(requestBody)
                 .retrieve()
-                .bodyToMono(String.class)
+                .bodyToMono(Map.class)
                 .block();
+
+        List<Map> choices = (List<Map>) response.get("choices");
+        Map message = (Map) choices.get(0).get("message");
+        return (String) message.get("content");
     }
 }
