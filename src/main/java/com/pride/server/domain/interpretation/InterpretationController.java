@@ -123,7 +123,7 @@ public class InterpretationController {
         if (!finalResponse.containsKey("noticedChange") ||
                 !finalResponse.containsKey("timingReason") ||
                 !finalResponse.containsKey("nextStep")) {
-            throw new RuntimeException("GPT 응답 구조 누락 (필수 필드 없음) - content: " + content);
+            throw new RuntimeException("GPT 응답 구조 누락 (필수 필드 없음)");
         }
 
         // 5. curveData에서 수치 직접 꺼내서 finalResponse에 예쁘게 주입하기
