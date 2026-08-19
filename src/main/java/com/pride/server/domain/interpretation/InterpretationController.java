@@ -61,7 +61,6 @@ public class InterpretationController {
                 .block();
 
         // 2. 프롬프트 구성 (3개 섹션 json 구조로 요청)
-        // 🔥 에러 해결: OpenAI가 인식할 수 있도록 영어 'json' 단어를 명시적으로 추가했습니다.
         String prompt = """
                 당신은 사용자의 얼굴 변화 데이터를 해석해주는 AI입니다.
                 아래 규칙을 반드시 지켜서 설명해주세요.
@@ -120,6 +119,13 @@ public class InterpretationController {
         // 4. GPT가 반환한 JSON 문자열을 Map으로 파싱
         Map<String, Object> finalResponse = objectMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
 
+        // 🔥 [안전장치 1] GPT가 빈 객체({})를 주거나 필수 키를 빼먹었을 경우 차단 (리뷰 봇 지적 사항 반영)
+        if (!finalResponse.containsKey("noticedChange") ||
+                !finalResponse.containsKey("timingReason") ||
+                !finalResponse.containsKey("nextStep")) {
+            throw new RuntimeException("GPT 응답 구조 누락 (필수 필드 없음) - content: " + content);
+        }
+
         // 5. curveData에서 수치 직접 꺼내서 finalResponse에 예쁘게 주입하기
         try {
             Map<String, Object> curveMap = objectMapper.readValue(curveData, new TypeReference<Map<String, Object>>() {});
@@ -142,9 +148,11 @@ public class InterpretationController {
                     String currentStr = String.format("%.1f", currentValue);
                     String averageStr = String.format("%.1f", averageValue);
 
-                    // GPT가 만든 noticedChange 객체 안에 수치 필드 추가
-                    Map<String, Object> noticedChange = (Map<String, Object>) finalResponse.get("noticedChange");
-                    if (noticedChange != null) {
+                    // 🔥 [안전장치 2] noticedChange가 정상적인 객체(Map)인지 한 번 더 확인하여 ClassCastException 방어
+                    Object noticedChangeObj = finalResponse.get("noticedChange");
+                    if (noticedChangeObj instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> noticedChange = (Map<String, Object>) noticedChangeObj;
                         noticedChange.put("currentValue", currentStr);
                         noticedChange.put("averageValue", averageStr);
                     }
