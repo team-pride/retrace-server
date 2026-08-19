@@ -7,15 +7,15 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
+import java.time.format.DateTimeParseException;
+import java.util.*;
 
 @Tag(name = "PhotoStorage", description = "과거 사진 저장/조회 API (되감기, 두 시점 비교용)")
 @RestController
@@ -79,13 +79,21 @@ public class PhotoStorageController {
             @RequestParam @Parameter(description = "첫 번째 날짜 (YYYY-MM-DD)") String date1,
             @RequestParam @Parameter(description = "두 번째 날짜 (YYYY-MM-DD)") String date2
     ) {
-        List<StoredPhoto> photos1 = storedPhotoRepository.findByUserIdAndCapturedAt(userId, LocalDate.parse(date1));
-        List<StoredPhoto> photos2 = storedPhotoRepository.findByUserIdAndCapturedAt(userId, LocalDate.parse(date2));
+        LocalDate d1, d2;
+        try {
+            d1 = LocalDate.parse(date1);
+            d2 = LocalDate.parse(date2);
+        } catch (DateTimeParseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)");
+        }
 
-        return Map.of(
-                "date1Photo", photos1.isEmpty() ? null : photos1.get(0).getImageBase64(),
-                "date2Photo", photos2.isEmpty() ? null : photos2.get(0).getImageBase64()
-        );
+        List<StoredPhoto> photos1 = storedPhotoRepository.findByUserIdAndCapturedAtOrderByCreatedAtDesc(userId, d1);
+        List<StoredPhoto> photos2 = storedPhotoRepository.findByUserIdAndCapturedAtOrderByCreatedAtDesc(userId, d2);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("date1Photo", photos1.isEmpty() ? null : photos1.get(0).getImageBase64());
+        result.put("date2Photo", photos2.isEmpty() ? null : photos2.get(0).getImageBase64());
+        return result;
     }
 
     private LocalDate extractCapturedDate(byte[] imageBytes) {

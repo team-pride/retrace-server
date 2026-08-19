@@ -8,4 +8,5 @@ import java.util.List;
 public interface StoredPhotoRepository extends JpaRepository<StoredPhoto, java.util.UUID> {
     List<StoredPhoto> findByUserIdOrderByCapturedAtAsc(String userId);
     List<StoredPhoto> findByUserIdAndCapturedAt(String userId, LocalDate capturedAt);
+    List<StoredPhoto> findByUserIdAndCapturedAtOrderByCreatedAtDesc(String userId, LocalDate capturedAt);
 }
