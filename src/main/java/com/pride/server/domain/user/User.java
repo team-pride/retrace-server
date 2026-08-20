@@ -20,9 +20,6 @@ public class User {
     @GeneratedValue
     private UUID id;
 
-    @Lob
-    private float[] faceVector;
-
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
