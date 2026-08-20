@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -13,11 +14,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.http.HttpStatus;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Tag(name = "Face", description = "얼굴 인식 관련 API (Python 서버 연동)")
@@ -52,6 +51,8 @@ public class FaceController {
                 .bodyToMono(String.class)
                 .block();
 
+        // Python 등록이 성공적으로 끝났으므로(예외 없이 여기까지 왔으므로),
+        // Java User 테이블에도 등록 완료 여부를 기록해둔다.
         userRepository.findById(UUID.fromString(userId)).ifPresent(user -> {
             user.setFaceRegistered(true);
             userRepository.save(user);
@@ -88,12 +89,19 @@ public class FaceController {
                     "온보딩(얼굴 등록) 화면으로 보낼지 홈 화면으로 바로 보낼지 판단하는 데 사용한다."
     )
     @GetMapping("/status")
-    public Map<String, Object> checkFaceStatus(
+    public FaceStatusResponse checkFaceStatus(
             @RequestParam @Parameter(description = "사용자 UUID") String userId
     ) {
-        User user = userRepository.findById(UUID.fromString(userId))
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(userId);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "잘못된 사용자 UUID 형식입니다.");
+        }
+
+        User user = userRepository.findById(uuid)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "존재하지 않는 사용자입니다."));
 
-        return Map.of("faceRegistered", user.isFaceRegistered());
+        return new FaceStatusResponse(user.isFaceRegistered());
     }
 }
