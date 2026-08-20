@@ -31,7 +31,7 @@ public class PhotoController {
 
     @Operation(summary = "사진 판정", description = "각도/블러/얼굴검출 신뢰도로 pass/conditional/exclude 판정")
     @PostMapping(value = "/evaluate", consumes = "multipart/form-data")
-    public String evaluate(
+    public Map<String, Object> evaluate(
             @RequestParam @Parameter(description = "재시도 추적용 키, 예: user123_2024-05_front") String photoKey,
             @RequestParam(required = false) @Parameter(description = "사용자 UUID (선택)") String userId,
             @RequestParam("file") MultipartFile file
@@ -40,7 +40,7 @@ public class PhotoController {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", file.getResource());
 
-        String result = aiServerWebClient.post()
+        Map<String, Object> result = aiServerWebClient.post()
                 .uri(uriBuilder -> {
                     uriBuilder.path("/api/v1/photo/evaluate")
                             .queryParam("photo_key", photoKey);
@@ -52,8 +52,12 @@ public class PhotoController {
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .bodyValue(body)
                 .retrieve()
-                .bodyToMono(String.class)
+                .bodyToMono(Map.class)
                 .block();
+
+        if (result == null) {
+            throw new IllegalStateException("AI 서버로부터 사진 판정 응답을 받지 못했습니다.");
+        }
 
         if (userId != null) {
             saveEvaluation(userId, result);
@@ -68,7 +72,7 @@ public class PhotoController {
                     "판정 결과는 서버에 저장되어 업로드 통계(GET /photo/upload-summary)에 반영된다."
     )
     @PostMapping(value = "/evaluate-batch", consumes = "multipart/form-data")
-    public String evaluateBatch(
+    public Map<String, Object> evaluateBatch(
             @RequestParam @Parameter(description = "사용자 UUID") String userId,
             @RequestParam("files") List<MultipartFile> files
     ) throws IOException {
@@ -78,7 +82,7 @@ public class PhotoController {
             body.add("files", file.getResource());
         }
 
-        String result = aiServerWebClient.post()
+        Map<String, Object> result = aiServerWebClient.post()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v1/photo/evaluate-batch")
                         .queryParam("user_id", userId)
@@ -86,8 +90,12 @@ public class PhotoController {
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .bodyValue(body)
                 .retrieve()
-                .bodyToMono(String.class)
+                .bodyToMono(Map.class)
                 .block();
+
+        if (result == null) {
+            throw new IllegalStateException("AI 서버로부터 일괄 판정 응답을 받지 못했습니다.");
+        }
 
         saveEvaluationBatch(userId, result);
 
@@ -128,7 +136,6 @@ public class PhotoController {
     public Map<String, Object> uploadSummary(
             @RequestParam @Parameter(description = "사용자 UUID") String userId
     ) {
-        // 1. 그래프에 들어간 사진 수 + 연도별 분포 (StoredPhoto 기반)
         List<StoredPhoto> photos = storedPhotoRepository.findByUserIdOrderByCapturedAtAsc(userId);
 
         Map<Integer, Long> yearCounts = photos.stream()
@@ -138,7 +145,6 @@ public class PhotoController {
                         Collectors.counting()
                 ));
 
-        // 2. 판정 등급별 개수 + 전체 업로드 수 (PhotoEvaluation 기반)
         List<PhotoEvaluation> evaluations = photoEvaluationRepository.findByUserId(userId);
 
         Map<String, Long> gradeCounts = evaluations.stream()
@@ -146,10 +152,10 @@ public class PhotoController {
                 .collect(Collectors.groupingBy(PhotoEvaluation::getGrade, Collectors.counting()));
 
         Map<String, Object> result = new HashMap<>();
-        result.put("succeededCount", photos.size());       // "그래프에 들어간 사진" 수
-        result.put("yearCounts", yearCounts);               // {"2019": 14, ...}
-        result.put("totalEvaluatedCount", evaluations.size()); // "넣은 사진 187장"
-        result.put("gradeCounts", gradeCounts);             // {"pass": 81, "conditional": 38, "exclude": 55}
+        result.put("succeededCount", photos.size());
+        result.put("yearCounts", yearCounts);
+        result.put("totalEvaluatedCount", evaluations.size());
+        result.put("gradeCounts", gradeCounts);
 
         return result;
     }
@@ -157,13 +163,12 @@ public class PhotoController {
     // ---- 내부 헬퍼 ----
 
     /**
-     * POST /photo/evaluate(단건) 결과를 파싱해서 저장한다.
+     * POST /photo/evaluate(단건) 결과를 저장한다.
      * 저장에 실패해도 evaluate 자체의 응답은 정상 반환하되,
      * 원인 추적이 가능하도록 반드시 로그를 남긴다 (조용히 무시하지 않음).
      */
-    private void saveEvaluation(String userId, String rawResult) {
+    private void saveEvaluation(String userId, Map<String, Object> parsed) {
         try {
-            Map<String, Object> parsed = objectMapper.readValue(rawResult, Map.class);
             PhotoEvaluation eval = new PhotoEvaluation();
             eval.setUserId(userId);
             eval.setPhotoKey((String) parsed.get("photo_key"));
@@ -176,19 +181,11 @@ public class PhotoController {
     }
 
     /**
-     * POST /photo/evaluate-batch 결과(results 배열)를 파싱해서 각 항목을 저장한다.
+     * POST /photo/evaluate-batch 결과(results 배열)를 저장한다.
      * 항목 하나가 저장에 실패해도 나머지 항목은 계속 저장을 시도하며,
      * 실패한 항목은 로그로 남겨 추후 원인 파악이 가능하게 한다.
      */
-    private void saveEvaluationBatch(String userId, String rawResult) {
-        Map<String, Object> parsed;
-        try {
-            parsed = objectMapper.readValue(rawResult, Map.class);
-        } catch (Exception e) {
-            log.error("evaluate-batch 응답 파싱 실패 - userId: {}, error: {}", userId, e.getMessage(), e);
-            return;
-        }
-
+    private void saveEvaluationBatch(String userId, Map<String, Object> parsed) {
         List<Map<String, Object>> results = (List<Map<String, Object>>) parsed.get("results");
         if (results == null) {
             log.warn("evaluate-batch 응답에 results 필드가 없음 - userId: {}", userId);
@@ -205,7 +202,6 @@ public class PhotoController {
                 eval.setReasons(reasons != null ? objectMapper.writeValueAsString(reasons) : null);
                 photoEvaluationRepository.save(eval);
             } catch (Exception e) {
-                // 한 항목이 실패해도 나머지 항목 저장은 계속 진행
                 log.error("PhotoEvaluation 저장 실패 - userId: {}, photoKey: {}, error: {}",
                         userId, item.get("photo_key"), e.getMessage(), e);
             }
