@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Tag(name = "Face", description = "얼굴 인식 관련 API (Python 서버 연동)")
@@ -30,7 +31,7 @@ public class FaceController {
 
     @Operation(summary = "본인 얼굴 기준 벡터 등록")
     @PostMapping(value = "/register", consumes = "multipart/form-data")
-    public String register(
+    public Map<String, Object> register(
             @RequestParam @Parameter(description = "사용자 UUID") String userId,
             @RequestParam("files") List<MultipartFile> files
     ) throws IOException {
@@ -40,7 +41,7 @@ public class FaceController {
             body.add("files", file.getResource());
         }
 
-        String result = aiServerWebClient.post()
+        Map<String, Object> result = aiServerWebClient.post()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v1/face/register")
                         .queryParam("user_id", userId)
@@ -48,8 +49,12 @@ public class FaceController {
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .bodyValue(body)
                 .retrieve()
-                .bodyToMono(String.class)
+                .bodyToMono(Map.class)
                 .block();
+
+        if (result == null) {
+            throw new IllegalStateException("AI 서버로부터 얼굴 등록 응답을 받지 못했습니다.");
+        }
 
         // Python 등록이 성공적으로 끝났으므로(예외 없이 여기까지 왔으므로),
         // Java User 테이블에도 등록 완료 여부를 기록해둔다.
@@ -63,7 +68,7 @@ public class FaceController {
 
     @Operation(summary = "본인 여부 판정", description = "대조 사진 업로드 → 기준 벡터와 비교")
     @PostMapping(value = "/verify", consumes = "multipart/form-data")
-    public String verify(
+    public Map<String, Object> verify(
             @RequestParam @Parameter(description = "사용자 UUID") String userId,
             @RequestParam("file") MultipartFile file
     ) throws IOException {
@@ -71,7 +76,7 @@ public class FaceController {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", file.getResource());
 
-        return aiServerWebClient.post()
+        Map<String, Object> result = aiServerWebClient.post()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v1/face/verify")
                         .queryParam("user_id", userId)
@@ -79,8 +84,14 @@ public class FaceController {
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .bodyValue(body)
                 .retrieve()
-                .bodyToMono(String.class)
+                .bodyToMono(Map.class)
                 .block();
+
+        if (result == null) {
+            throw new IllegalStateException("AI 서버로부터 본인 검증 응답을 받지 못했습니다.");
+        }
+
+        return result;
     }
 
     @Operation(
