@@ -160,7 +160,7 @@ public class InterpretationController {
             }
         } catch (Exception e) {
             // 파이썬 데이터 파싱 중 에러가 나더라도 GPT 텍스트 응답 자체는 정상적으로 나가도록 예외 처리
-            System.out.println("수치 추출 중 에러 발생: " + e.getMessage());
+            System.out.println("수치 추출 중 에러 발생: " + e.getClass().getSimpleName());
         }
 
         return finalResponse;

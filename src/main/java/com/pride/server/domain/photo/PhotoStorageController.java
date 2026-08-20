@@ -122,6 +122,7 @@ public class PhotoStorageController {
             }
             } catch (Exception e) {
                 // 이 지표 하나 실패해도 나머지 지표/사진은 계속 진행
+                // 이 지표 수치 추출 중 에러 발생: 하나 실패해도 나머지 지표/사진은 계속 진행
                 indicatorDiffs.put(indicator, "계산 실패");
             }
         }
