@@ -12,6 +12,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;   // ← 추가
 
 @Tag(name = "Home", description = "홈 화면 요약 API")
 @RestController
@@ -94,5 +95,51 @@ public class HomeController {
         result.put("trend", trend);
 
         return result;
+    }
+
+    @Operation(summary = "지금 하고 있는 관리 목록", description = "마커를 note별로 그룹핑해 횟수와 최근 날짜 반환")
+    @GetMapping("/current-care")
+    public List<Map<String, Object>> currentCare(
+            @RequestParam @Parameter(description = "사용자 UUID") String userId
+    ) {
+        Map<String, Object> markerResponse = aiServerWebClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/marker/list")
+                        .queryParam("user_id", userId)
+                        .build())
+                .retrieve()
+                .bodyToMono(Map.class)
+                .block();
+
+        if (markerResponse == null) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> markers = (List<Map<String, Object>>) markerResponse.get("markers");
+        if (markers == null || markers.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, List<Map<String, Object>>> groupedByNote = markers.stream()
+                .collect(Collectors.groupingBy(m -> (String) m.get("note")));
+
+        return groupedByNote.entrySet().stream()
+                .map(entry -> {
+                    String note = entry.getKey();
+                    List<Map<String, Object>> group = entry.getValue();
+
+                    String latestDate = group.stream()
+                            .map(m -> (String) m.get("marker_date"))
+                            .max(String::compareTo)
+                            .orElse(null);
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("note", note);
+                    result.put("count", group.size());
+                    result.put("latestDate", latestDate);
+                    return result;
+                })
+                .sorted((a, b) -> ((String) b.get("latestDate")).compareTo((String) a.get("latestDate")))
+                .toList();
     }
 }
