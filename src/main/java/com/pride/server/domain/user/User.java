@@ -20,6 +20,8 @@ public class User {
     @GeneratedValue
     private UUID id;
 
+    private boolean faceRegistered = false;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
