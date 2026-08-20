@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.io.IOException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -37,6 +37,9 @@ public class IndicatorController {
             @RequestParam("files") List<MultipartFile> files
     ) throws Exception {
 
+        // fallbackCapturedAt은 문자열로 한 번만 파싱해서, Python 호출과 사진 저장 양쪽에 동일하게 사용
+        LocalDate parsedFallback = fallbackCapturedAt != null ? LocalDate.parse(fallbackCapturedAt) : null;
+
         // 1. Python 서버로 지표 추출 요청 (기존 로직)
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         for (MultipartFile file : files) {
@@ -59,7 +62,8 @@ public class IndicatorController {
                 .block();
 
         // 2. 같은 사진들을 되감기/비교용으로 서버(RDS)에도 저장
-        PhotoStorageService.StoreResult storeResult = photoStorageService.storePhotos(userId, files);
+        //    Python과 동일한 fallback 날짜를 넘겨서, EXIF 없는 사진의 처리 결과가 서로 어긋나지 않도록 함
+        PhotoStorageService.StoreResult storeResult = photoStorageService.storePhotos(userId, files, parsedFallback);
 
         // 3. 지표 추출 결과 + 사진 저장 결과를 합쳐서 응답
         return Map.of(
