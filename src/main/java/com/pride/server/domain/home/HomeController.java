@@ -8,11 +8,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;   // ← 추가
+import java.util.stream.Collectors;
 
 @Tag(name = "Home", description = "홈 화면 요약 API")
 @RestController
@@ -62,22 +61,30 @@ public class HomeController {
             return Map.of("eligible", false, "message", "표시할 데이터가 없습니다.");
         }
 
-        // 최신값 (가장 마지막 포인트)
-        Map<String, Object> latestPoint = points.get(points.size() - 1);
+        // 최신값 (captured_at이 가장 큰 포인트) — Python이 정렬을 보장한다고 단정하지 않고 직접 max로 탐색
+        Map<String, Object> latestPoint = points.stream()
+                .max((a, b) -> ((String) a.get("captured_at")).compareTo((String) b.get("captured_at")))
+                .orElseThrow();
         double latestValue = ((Number) latestPoint.get("value")).doubleValue();
         String latestDate = (String) latestPoint.get("captured_at");
+        LocalDate latestDateParsed = LocalDate.parse(latestDate);
 
-        // N주 전 값 (오늘 - N*7일에 가장 가까운 포인트)
-        LocalDate targetPastDate = LocalDate.now().minusWeeks(RECENT_WEEKS);
+        // N주 전 값 — 기준을 서버의 "오늘"이 아니라 "가장 최근 촬영일" 기준으로 계산
+        LocalDate targetPastDate = latestDateParsed.minusWeeks(RECENT_WEEKS);
+
+        // targetPastDate 이전(또는 그 시점) 데이터 중 가장 최근 것을 pastPoint로 선택
         Map<String, Object> pastPoint = points.stream()
-                .min((a, b) -> {
-                    long diffA = Math.abs(ChronoUnit.DAYS.between(
-                            targetPastDate, LocalDate.parse((String) a.get("captured_at"))));
-                    long diffB = Math.abs(ChronoUnit.DAYS.between(
-                            targetPastDate, LocalDate.parse((String) b.get("captured_at"))));
-                    return Long.compare(diffA, diffB);
-                })
-                .orElse(points.get(0));
+                .filter(p -> !LocalDate.parse((String) p.get("captured_at")).isAfter(targetPastDate))
+                .max((a, b) -> ((String) a.get("captured_at")).compareTo((String) b.get("captured_at")))
+                .orElse(null);
+
+        // 8주 전 시점에 해당하는 데이터가 아예 없으면, 억지로 비교하지 않고 데이터 부족으로 응답
+        if (pastPoint == null) {
+            return Map.of(
+                    "eligible", false,
+                    "reasons", List.of(RECENT_WEEKS + "주 이상의 기록이 필요해요")
+            );
+        }
 
         double pastValue = ((Number) pastPoint.get("value")).doubleValue();
         String pastDate = (String) pastPoint.get("captured_at");
