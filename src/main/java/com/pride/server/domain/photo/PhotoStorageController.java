@@ -1,24 +1,20 @@
 package com.pride.server.domain.photo;
 
-import com.drew.imaging.ImageMetadataReader;
-import com.drew.metadata.Metadata;
-import com.drew.metadata.exif.ExifSubIFDDirectory;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 
-@Tag(name = "PhotoStorage", description = "과거 사진 저장/조회 API (되감기, 두 시점 비교용)")
+@Tag(name = "PhotoStorage", description = "저장된 사진 조회 API (되감기, 두 시점 비교용). " +
+        "사진 저장 자체는 POST /indicator/extract-batch 에서 지표 추출과 함께 처리된다.")
 @RestController
 @RequestMapping("/photos")
 @RequiredArgsConstructor
@@ -26,37 +22,6 @@ public class PhotoStorageController {
 
     private final StoredPhotoRepository storedPhotoRepository;
     private final WebClient aiServerWebClient;
-
-    @Operation(summary = "사진 저장", description = "지표 추출과 별개로, 되감기/비교용으로 사진을 서버에 저장")
-    @PostMapping(value = "/store", consumes = "multipart/form-data")
-    public String storePhotos(
-            @RequestParam @Parameter(description = "사용자 UUID") String userId,
-            @RequestParam("files") List<MultipartFile> files
-    ) throws Exception {
-        int savedCount = 0;
-        List<String> skipped = new ArrayList<>();   // ① 여기서 선언
-
-        for (MultipartFile file : files) {
-            byte[] bytes = file.getBytes();
-            LocalDate capturedAt = extractCapturedDate(bytes);
-
-            if (capturedAt == null) {
-                skipped.add(file.getOriginalFilename());   // ② continue 직전에 기록
-                continue;
-            }
-
-            StoredPhoto photo = new StoredPhoto();
-            photo.setUserId(userId);
-            photo.setCapturedAt(capturedAt);
-            photo.setImageBase64(Base64.getEncoder().encodeToString(bytes));
-
-            storedPhotoRepository.save(photo);
-            savedCount++;
-        }
-
-        return savedCount + "장 저장 완료"
-                + (skipped.isEmpty() ? "" : " (촬영일 없어 스킵: " + skipped + ")");   // ③ 리턴문 교체
-    }
 
     @Operation(summary = "저장된 사진 목록 조회 (되감기)", description = "촬영일 순으로 정렬된 사진 목록 반환")
     @GetMapping
@@ -99,30 +64,29 @@ public class PhotoStorageController {
         for (String indicator : indicators) {
             try {
                 Map curveResponse = aiServerWebClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/api/v1/indicator/curve")
-                            .queryParam("user_id", userId)
-                            .queryParam("indicator", indicator)
-                            .build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+                        .uri(uriBuilder -> uriBuilder
+                                .path("/api/v1/indicator/curve")
+                                .queryParam("user_id", userId)
+                                .queryParam("indicator", indicator)
+                                .build())
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .block();
 
-            if (curveResponse == null) continue;
+                if (curveResponse == null) continue;
 
-            List<Map<String, Object>> points = (List<Map<String, Object>>) curveResponse.get("points");
-            if (points == null) continue;
+                List<Map<String, Object>> points = (List<Map<String, Object>>) curveResponse.get("points");
+                if (points == null) continue;
 
-            Double value1 = findValueByDate(points, date1);
-            Double value2 = findValueByDate(points, date2);
+                Double value1 = findValueByDate(points, date1);
+                Double value2 = findValueByDate(points, date2);
 
-            if (value1 != null && value2 != null) {
-                double diff = value2 - value1;
-                indicatorDiffs.put(indicator, String.format("%+.1f", diff));
-            }
+                if (value1 != null && value2 != null) {
+                    double diff = value2 - value1;
+                    indicatorDiffs.put(indicator, String.format("%+.1f", diff));
+                }
             } catch (Exception e) {
                 // 이 지표 하나 실패해도 나머지 지표/사진은 계속 진행
-                // 이 지표 수치 추출 중 에러 발생: 하나 실패해도 나머지 지표/사진은 계속 진행
                 indicatorDiffs.put(indicator, "계산 실패");
             }
         }
@@ -140,24 +104,5 @@ public class PhotoStorageController {
                 .map(p -> ((Number) p.get("value")).doubleValue())
                 .findFirst()
                 .orElse(null);
-    }
-
-    private LocalDate extractCapturedDate(byte[] imageBytes) {
-        try {
-            Metadata metadata = ImageMetadataReader.readMetadata(
-                    new java.io.ByteArrayInputStream(imageBytes));
-            ExifSubIFDDirectory directory = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
-
-            if (directory != null && directory.getDateOriginal() != null) {
-                return directory.getDateOriginal().toInstant()
-                        .atZone(ZoneId.systemDefault())
-                        .toLocalDate();
-            } else {
-                System.out.println("EXIF 없음 or DateOriginal 없음"); // 임시 로그
-            }
-        } catch (Exception e) {
-            System.out.println("EXIF 파싱 실패: " + e.getMessage()); // 임시 로그
-        }
-        return null;
     }
 }
