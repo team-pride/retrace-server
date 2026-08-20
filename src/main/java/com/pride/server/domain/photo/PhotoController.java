@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -16,6 +17,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Tag(name = "Photo", description = "사진 판정/정규화 관련 API (Python 서버 연동)")
 @RestController
 @RequestMapping("/photo")
@@ -154,7 +156,11 @@ public class PhotoController {
 
     // ---- 내부 헬퍼 ----
 
-    /** POST /photo/evaluate(단건) 결과를 파싱해서 저장 */
+    /**
+     * POST /photo/evaluate(단건) 결과를 파싱해서 저장한다.
+     * 저장에 실패해도 evaluate 자체의 응답은 정상 반환하되,
+     * 원인 추적이 가능하도록 반드시 로그를 남긴다 (조용히 무시하지 않음).
+     */
     private void saveEvaluation(String userId, String rawResult) {
         try {
             Map<String, Object> parsed = objectMapper.readValue(rawResult, Map.class);
@@ -165,18 +171,32 @@ public class PhotoController {
             eval.setReasons(objectMapper.writeValueAsString(parsed.get("reasons")));
             photoEvaluationRepository.save(eval);
         } catch (Exception e) {
-            // 저장 실패해도 evaluate 응답 자체는 정상 반환되도록 무시
+            log.error("PhotoEvaluation 저장 실패 - userId: {}, error: {}", userId, e.getMessage(), e);
         }
     }
 
-    /** POST /photo/evaluate-batch 결과(results 배열)를 파싱해서 각 항목 저장 */
+    /**
+     * POST /photo/evaluate-batch 결과(results 배열)를 파싱해서 각 항목을 저장한다.
+     * 항목 하나가 저장에 실패해도 나머지 항목은 계속 저장을 시도하며,
+     * 실패한 항목은 로그로 남겨 추후 원인 파악이 가능하게 한다.
+     */
     private void saveEvaluationBatch(String userId, String rawResult) {
+        Map<String, Object> parsed;
         try {
-            Map<String, Object> parsed = objectMapper.readValue(rawResult, Map.class);
-            List<Map<String, Object>> results = (List<Map<String, Object>>) parsed.get("results");
-            if (results == null) return;
+            parsed = objectMapper.readValue(rawResult, Map.class);
+        } catch (Exception e) {
+            log.error("evaluate-batch 응답 파싱 실패 - userId: {}, error: {}", userId, e.getMessage(), e);
+            return;
+        }
 
-            for (Map<String, Object> item : results) {
+        List<Map<String, Object>> results = (List<Map<String, Object>>) parsed.get("results");
+        if (results == null) {
+            log.warn("evaluate-batch 응답에 results 필드가 없음 - userId: {}", userId);
+            return;
+        }
+
+        for (Map<String, Object> item : results) {
+            try {
                 PhotoEvaluation eval = new PhotoEvaluation();
                 eval.setUserId(userId);
                 eval.setPhotoKey((String) item.get("photo_key"));
@@ -184,9 +204,11 @@ public class PhotoController {
                 Object reasons = item.get("reasons");
                 eval.setReasons(reasons != null ? objectMapper.writeValueAsString(reasons) : null);
                 photoEvaluationRepository.save(eval);
+            } catch (Exception e) {
+                // 한 항목이 실패해도 나머지 항목 저장은 계속 진행
+                log.error("PhotoEvaluation 저장 실패 - userId: {}, photoKey: {}, error: {}",
+                        userId, item.get("photo_key"), e.getMessage(), e);
             }
-        } catch (Exception e) {
-            // 저장 실패해도 evaluate-batch 응답 자체는 정상 반환되도록 무시
         }
     }
 }
