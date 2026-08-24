@@ -83,11 +83,10 @@ public class PhotoStorageController {
 
                 if (value1 != null && value2 != null) {
                     double diff = value2 - value1;
-                    indicatorDiffs.put(indicator, String.format("%+.1f", diff));
+                    indicatorDiffs.put(indicator, diff);
                 }
             } catch (Exception e) {
-                // 이 지표 하나 실패해도 나머지 지표/사진은 계속 진행
-                indicatorDiffs.put(indicator, "계산 실패");
+
             }
         }
 
